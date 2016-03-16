@@ -1,6 +1,7 @@
 module LeastSquares
     ( someFunc
-    , Expr
+    , VarName
+    , Expr(..)
     , minimize
     ) where
 
