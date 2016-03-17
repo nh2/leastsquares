@@ -18,19 +18,13 @@ type VarName = String
 infix 4 :==:
 
 data LinExpr = Var VarName Int
-              | Coeff R
-              | Vec (Vector R)
-              | Mat (Matrix R)
-              | Neg LinExpr
-              | Sum LinExpr LinExpr
-              | Prod LinExpr LinExpr
-              deriving (Show, Eq)
-
-data LinContr = LinExpr :==: LinExpr
-
-data QuadExpr = SumSquares LinExpr
-              | ProdQuad Double QuadExpr
-              | SumQuad QuadExpr QuadExpr
+             | Coeff R
+             | Vec (Vector R)
+             | Mat (Matrix R)
+             | Neg LinExpr
+             | Sum LinExpr LinExpr
+             | Prod LinExpr LinExpr
+             deriving (Show, Eq)
 
 instance Num LinExpr where
   (+) = Sum
@@ -41,57 +35,69 @@ instance Num LinExpr where
   abs    = undefined
   fromInteger a = Coeff (fromInteger a)
 
+data LinContr = LinExpr :==: LinExpr
+
+data QuadExpr = SumSquares LinExpr
+              | CoeffQuad R
+              | ProdQuad QuadExpr QuadExpr
+              | SumQuad QuadExpr QuadExpr
+
 instance Num QuadExpr where
   (+) = SumQuad
-  a - b = Sum a (Neg b)
   (*) = ProdQuad
+  (-) = undefined
   negate = undefined
   signum = undefined
   abs    = undefined
-  fromInteger = undefined
+  fromInteger a = CoeffQuad (fromInteger a)
+
+class CanonExpr e where
+  varSet :: e -> S.Set (VarName, Int)
+  canonicalize :: e -> M.Map VarName (Matrix R)
 
 -- Canonicalize a generic expression
 -- The vector is stored as a column matrix under the variable "".
-canonicalize :: LinExpr -> M.Map VarName (Matrix R)
-canonicalize (Var v s) = M.singleton v (ident s)
-canonicalize (Vec v) = M.singleton "" (asColumn v)
-canonicalize (Neg e) = M.map (\x -> -x) $ canonicalize e
-canonicalize (Prod (Coeff c) e) = M.map (scale c) $ canonicalize e
-canonicalize (Prod (Mat m) e) = M.map (\x -> m <> x) $ canonicalize e
-canonicalize (Sum e1 e2) = M.unionWith (+) (canonicalize e1) (canonicalize e2)
-canonicalize _ = error "Expression is not well-formed"
+instance CanonExpr LinExpr where
+  varSet (Var v s) = S.singleton (v, s)
+  varSet (Coeff _) = S.empty
+  varSet (Vec _) = S.empty
+  varSet (Mat _) = S.empty
+  varSet (Neg e) = varSet e
+  varSet (Prod _ e) = varSet e
+  varSet (Sum e1 e2) = S.union (varSet e1) (varSet e2)
 
--- Canonicalize an expression in the objective, which consists of SumSquares.
-canonicalizeObj :: QuadExpr -> M.Map VarName (Matrix R)
-canonicalizeObj (SumSquares e) = canonicalize e
-canonicalizeObj (Sum (SumSquares e1) (SumSquares e2)) = M.unionWith (===) m1 m2
-  where m1 = canonicalize e1
-        m2 = canonicalize e2
-canonicalizeObj (Sum (SumSquares e1) (Prod (Coeff c) (SumSquares e2))) = M.unionWith (===) m1 m2
-  where m1 = canonicalize e1
-        m2 = M.map (scale (sqrt c)) $ canonicalize e2
-canonicalizeObj _ = error "Expression is not well-formed"
+  canonicalize (Var v s) = M.singleton v (ident s)
+  canonicalize (Vec v) = M.singleton "" (asColumn v)
+  canonicalize (Neg e) = M.map (\x -> -x) $ canonicalize e
+  canonicalize (Prod (Coeff c) e) = M.map (scale c) $ canonicalize e
+  canonicalize (Prod (Mat m) e) = M.map (\x -> m <> x) $ canonicalize e
+  canonicalize (Sum e1 e2) = M.unionWith (+) (canonicalize e1) (canonicalize e2)
+  canonicalize _ = error "Expression is not well-formed"
 
 -- Canonicalize an expression in the constraint
-canonicalizeConstraint :: LinExpr -> M.Map VarName (Matrix R)
-canonicalizeConstraint (e1 :==: e2) = canonicalize (e1 - e2)
+instance CanonExpr LinContr where
+  varSet (e1 :==: e2) = S.union (varSet e1) (varSet e2)
+  canonicalize (e1 :==: e2) = canonicalize (e1 - e2)
 
-varSet :: LinExpr -> S.Set (VarName, Int)
-varSet (Var v s) = S.singleton (v, s)
-varSet (Coeff _) = S.empty
-varSet (Vec _) = S.empty
-varSet (Mat _) = S.empty
-varSet (Neg e) = varSet e
-varSet (Prod _ e) = varSet e
-varSet (Sum e1 e2) = S.union (varSet e1) (varSet e2)
-varSet (SumSquares e) = varSet e
-varSet (e1 :==: e2) = S.union (varSet e1) (varSet e2)
+-- Canonicalize an expression in the objective, which consists of SumSquares.
+instance CanonExpr QuadExpr where
+  varSet (SumSquares e) = varSet e
+  varSet (CoeffQuad _) = S.empty
+  varSet (ProdQuad _ e) = varSet e
+  varSet (SumQuad e1 e2) = S.union (varSet e1) (varSet e2)
+
+  canonicalize (SumSquares e) = canonicalize e
+  canonicalize (ProdQuad (CoeffQuad c) e) = M.map (scale (sqrt c)) $ canonicalize e
+  canonicalize (SumQuad e1 e2) = M.unionWith (===) m1 m2
+    where m1 = canonicalize e1
+          m2 = canonicalize e2
+  canonicalize _ = error "Expression is not well-formed"
 
 minimize :: LinExpr -> [LinExpr] -> M.Map VarName (Vector R)
 minimize obj [] = unpack vars $ a <\> (-b)
   where (a, b) = pack (varSet obj) canonicalForm
         vars = varSet obj
-        canonicalForm = canonicalizeObj obj
+        canonicalForm = canonicalize obj
 -- minimize obj constraints = unpack $ subVector 0 lengthVar result
 --   where result = mat <\> vec
 --         mat = fromBlocks [[2 * tr a <> a, tr c], [c, 0]]
