@@ -105,9 +105,8 @@ minimize obj [] = unpack vars $ a <\> (-b)
   where
     (a,b) = pack vars . canonicalize $ obj
     vars = varSet obj
-minimize obj constraints = unpack vars result
+minimize obj constraints = unpack vars $ mat <\> (-vec)
   where
-    result = mat <\> (-vec)
     mat = fromBlocks [[2 * tr a <> a, tr c], [c, 0]]
     vec = vjoin [2 * tr a #> b, d]
     (a,b) = pack vars . canonicalize $ obj
