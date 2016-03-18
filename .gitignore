@@ -2,6 +2,9 @@ TAGS
 auto/
 _minted-presentation/
 *.pdf
+_minted-report/
+_region_.prv/
+_region_.tex
 # Created by https://www.gitignore.io/api/haskell
 
 ### Haskell ###

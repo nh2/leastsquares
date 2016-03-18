@@ -1,0 +1,172 @@
+\documentclass[12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath, amssymb, amsfonts, amsthm, minted}
+\usepackage[top=1in, bottom=1in, left=1in, right=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{positioning,calc,shapes,arrows}
+% Define block styles XXX
+\tikzstyle{block} = [rectangle, draw,
+    text width=8em, text centered, minimum height=5em]
+\tikzstyle{line} = [draw, -latex',line width=1mm]
+
+\providecommand{\abs}[1]{\left\lvert#1\right\rvert}
+\providecommand{\norm}[1]{\left\lVert#1\right\rVert}
+
+\title{CS 240H Project Report: \\ Linear Least Squares Modeling in Haskell}
+\author{Tri Dao \\ \texttt{trid@stanford.edu}}
+\date{March 18, 2016}
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+Least squares are optimization problems that minimize the norm square
+of an affine expression, subject to linear constraints on the variables.
+They have the general form
+\begin{equation}
+  \begin{array}{ll}
+    \mbox{minimize} & \|Ax-b\|^2 \\
+    \mbox{subject to} & Cx = d
+  \end{array}
+  \label{eq:std_form}
+\end{equation}
+where $x \in \mathbb{R}^{n}$ is a variable, $A \in \mathbb{R}^{m \times n}$ and
+$C \in \mathbb{R}^{p \times n}$ are matrices, and $b \in \mathbb{R}^m$ and
+$d \in \mathbb{R}^p$ are vectors.
+
+These problems are routinely solved in the context of statistical estimation,
+machine learning, and engineering design.
+For example, linear regression, an approach for modeling the relationship
+between a scalar dependent variable $y$ and one or more explanatory variables
+$X$, involves solving the problem minimize $\norm{X \beta - y}^2$ to find
+$\beta$, where $X$ is a given data matrix, $y$ is a given vector, and $\beta$ is
+the \emph{parameter vector}.
+
+In general, there can be many variables, the objective can contain many
+quadratic terms, and there can be multiple linear constraints.
+Typically one has to rewrite the problem in the standard
+form~\eqref{eq:std_form} and then use a general solver implemented by many
+numerical linear algebra packages.
+However, this is a tedious and error-prone process, especially for problems with
+many variables or several linear constraints.
+
+We aim to develop a modeling language embedded in Haskell to solve these
+linearly constraints least squares problems.
+This modeling language (in Haskell) will allow user to specify the problem in a
+natural way that mirrors standard mathematical notation without being
+constrained by the standard form.
+
+\section{Background}
+
+The (unconstrained) \emph{least squares problem} has the standard form
+\begin{equation*}
+  \begin{array}{ll}
+    \mbox{minimize} & \|Ax-b\|^2,
+  \end{array}
+\end{equation*}
+where $x \in \mathbb{R}^n$ is a variable, $A \in \mathbb{R}^{m \times n}$ is a
+matrix, and $b \in \mathbb{R}^m$ is a vector.
+Assuming that $A$ is full rank, the least squares problem has the close-form
+solution
+\begin{equation*}
+  \hat x = (A^T A)^{-1} A^T b.
+\end{equation*}
+
+A slight generalization is the (linearly) \emph{constrained least squares problem}:
+\begin{equation*}
+  \begin{array}{ll}
+    \mbox{minimize} & \|Ax-b\|^2 \\
+    \mbox{subject to} & Cx = d
+  \end{array}
+\end{equation*}
+where $x \in \mathbb{R}^{n}$ is a variable, $A \in \mathbb{R}^{m \times n}$ and
+$C \in \mathbb{R}^{p \times n}$ are matrices, and $b \in \mathbb{R}^m$ and
+$d \in \mathbb{R}^p$ are vectors. The solution of this constrained problem is
+\begin{equation*}
+  \left[\begin{array}{c} \hat x \\ z \end{array}\right] =
+  \left[\begin{array}{cc} 2A^TA & C^T \\ C & 0 \end{array}\right]^{-1}
+  \left[\begin{array}{c} 2A^Tb \\ d \end{array}\right],
+\end{equation*}
+where $z$ is the dual variable to the equality constraint.
+We assume that the matrix above is invertible.
+This occurs when the matrix $C$ has independent rows, and the matrix
+$\begin{bmatrix} A \\ C \end{bmatrix}$ has independent columns.
+
+\section{Modeling}
+
+The key data structure is an \verb|Expr|, which contains variables and constants
+that are combined using linear mathematical functions (addition, scaling,
+matrix-vector multiplication, etc.).
+
+\section{Implementation}
+
+Given a problem whose objective is an Expression and whose constraints are
+multiple other Expressions, the system will analyze the abstract syntax tree to
+transform it to the standard form above, and then solve it using linear algebra
+subroutines.
+
+The three steps of solving a least squares problem is given in Figure~\ref{fig:steps}.
+\begin{figure}[!ht]
+  \centering
+  \begin{tikzpicture}[auto]
+      % Place nodes
+      \node (left_up) {};
+      % \node [below=1cm of left_up] (left_down) {};
+      \node [block,right=4mm of left_up] (code) {$\begin{array}{l}
+      \tt{u = \ldots} \\
+      \tt{v = \ldots} \\
+      \tt{minimize \ldots}
+      \end{array}$};
+      \node [block, right =2.75cm of code] (cone) {$\begin{array}{ll}
+  \mbox{min.}  &\|Ax-b\|^2 \\
+  \mbox{s.t.} &Cx = d
+  \end{array}$};
+      \node [block, below =2cm of cone] (sltn) {$\begin{array}{c}
+  x = (1.58,\ldots \\
+  \vdots
+  \end{array}$};
+      \node [block, left =2.75cm of sltn] (unpack) {$\begin{array}{l}
+      \tt{u = (0.59,\ldots}\\
+      \tt{v = (1.9,\ldots}
+      \end{array}$};
+  \path [line] (code) -- node {canonicalize} ++(4,0) -- (cone);
+  \path [line] (cone) -- node {solve} ++(0,-2.5) -- (sltn);
+  \path [line] (sltn) -- node {unpack} ++(-4,0) -- (unpack);
+  \end{tikzpicture}
+  \caption{Three steps of solving a least squares problem.}
+  \label{fig:steps}
+\end{figure}
+
+\section{Examples}
+
+\section{Conclusion}
+
+We have designed and implemented a modeling language embedded in Haskell for
+linearly constrained least squares problem.
+There are still some work to be done to add more linear operators (vector
+indexing, convolution, Fourier transform, vector and matrix stacking, element
+wise multiplication, etc.).
+Moreover, the package only supports dense matrices due to lack of sparse matrix
+support in Haskell.
+
+Overall, this modeling language will allow users to express their problems in a
+natural form while the system takes care of transforming it to the standard
+form.
+This might lead to faster prototyping and data analysis in statistical
+estimation, machine learning, and engineering design.
+
+\section*{Acknowledgment}
+
+We thank Professor Stephen Boyd for introducing us to many examples of least
+squares modeling in control, statistical estimation, and engineering design.
+We also thank David Zeng whose Julia package \verb|LinearLeastSquares| inspired
+this project.
+
+\end{document}
+%%% Local Variables:
+%%% mode: latex
+%%% TeX-master: t
+%%% End:
