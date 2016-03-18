@@ -1,19 +1,20 @@
 module LeastSquares
-    ( someFunc
-    , VarName
+    ( VarName
     , LinExpr(..)
     , LinContr(..)
     , QuadExpr(..)
     , minimize
     ) where
 
-import Data.List (elemIndex)
-import Data.Maybe (fromJust)
-import qualified Data.Map.Strict as M
-import qualified Data.Set as S
-import Numeric.LinearAlgebra
+import           Data.List             (elemIndex, foldl1')
+import qualified Data.Map.Strict       as M
+import           Data.Maybe            (fromJust)
+import qualified Data.Set              as S
+import           Numeric.LinearAlgebra
 
 type VarName = String
+
+type CanonicalMap = M.Map VarName (Matrix R)
 
 infix 4 :==:
 
@@ -53,7 +54,7 @@ instance Num QuadExpr where
 
 class CanonExpr e where
   varSet :: e -> S.Set (VarName, Int)
-  canonicalize :: e -> M.Map VarName (Matrix R)
+  canonicalize :: e -> CanonicalMap
 
 -- Canonicalize a generic expression
 -- The vector is stored as a column matrix under the variable "".
@@ -64,7 +65,7 @@ instance CanonExpr LinExpr where
   varSet (Mat _) = S.empty
   varSet (Neg e) = varSet e
   varSet (Prod _ e) = varSet e
-  varSet (Sum e1 e2) = S.union (varSet e1) (varSet e2)
+  varSet (Sum e1 e2) = varSet e1 `S.union` varSet e2
 
   canonicalize (Var v s) = M.singleton v (ident s)
   canonicalize (Vec v) = M.singleton "" (asColumn v)
@@ -76,7 +77,7 @@ instance CanonExpr LinExpr where
 
 -- Canonicalize an expression in the constraint
 instance CanonExpr LinContr where
-  varSet (e1 :==: e2) = S.union (varSet e1) (varSet e2)
+  varSet (e1 :==: e2) = varSet e1 `S.union` varSet e2
   canonicalize (e1 :==: e2) = canonicalize (e1 - e2)
 
 -- Canonicalize an expression in the objective, which consists of SumSquares.
@@ -84,38 +85,44 @@ instance CanonExpr QuadExpr where
   varSet (SumSquares e) = varSet e
   varSet (CoeffQuad _) = S.empty
   varSet (ProdQuad _ e) = varSet e
-  varSet (SumQuad e1 e2) = S.union (varSet e1) (varSet e2)
+  varSet (SumQuad e1 e2) = varSet e1 `S.union` varSet e2
 
   canonicalize (SumSquares e) = canonicalize e
   canonicalize (ProdQuad (CoeffQuad c) e) = M.map (scale (sqrt c)) $ canonicalize e
-  canonicalize (SumQuad e1 e2) = M.unionWith (===) m1 m2
-    where m1 = canonicalize e1
-          m2 = canonicalize e2
+  canonicalize (SumQuad e1 e2) = canonicalize e1 `vstack` canonicalize e2
   canonicalize _ = error "Expression is not well-formed"
 
-minimize :: LinExpr -> [LinExpr] -> M.Map VarName (Vector R)
-minimize obj [] = unpack vars $ a <\> (-b)
-  where (a, b) = pack (varSet obj) canonicalForm
-        vars = varSet obj
-        canonicalForm = canonicalize obj
--- minimize obj constraints = unpack $ subVector 0 lengthVar result
---   where result = mat <\> vec
---         mat = fromBlocks [[2 * tr a <> a, tr c], [c, 0]]
---         vec = vjoin [2 * tr a #> b, d]
---         (a, b) = pack $ canonicalizeObj obj
---         b = undefined
---         c = undefined
---         d = undefined
---         lengthVar = snd $ size a
+-- Combine two canonical maps by stacking one on top of another.
+vstack :: CanonicalMap -> CanonicalMap -> CanonicalMap
+vstack m1 m2 = M.fromSet combine (M.keysSet m1 `S.union` M.keysSet m2)
+  where combine k = lookupDefault k m1 === lookupDefault k m2
+        lookupDefault k m = M.findWithDefault (konst 0 (firstDim m, 1)) k m
+        firstDim = rows . snd . fromJust . M.lookupGE "" :: CanonicalMap -> Int
 
-pack :: S.Set (VarName, Int) -> M.Map VarName (Matrix R) -> (Matrix R, Vector R)
+minimize :: QuadExpr -> [LinContr] -> M.Map VarName (Vector R)
+minimize obj [] = unpack vars $ a <\> (-b)
+  where (a, b) = pack vars . canonicalize $ obj
+        vars = varSet obj
+-- minimize obj constraints = unpack vars (subVector 0 lengthVar result)
+minimize obj constraints = unpack vars result
+  where result = mat <\> (-vec)
+        mat = fromBlocks [[2 * tr a <> a, tr c], [c, 0]]
+        vec = vjoin [2 * tr a #> b, d]
+        (a, b) = pack vars . canonicalize $ obj
+        (c, d) = pack vars $ foldl1' vstack cds
+        cds = map canonicalize constraints
+        vars = varSet obj `S.union` S.unions (map varSet constraints)
+        -- lengthVar = cols a
+
+pack :: S.Set (VarName, Int) -> CanonicalMap -> (Matrix R, Vector R)
 pack vars m = (a, b)
   where a = fromBlocks [matrices]
         matrices = map getCoefficient (S.toAscList vars)
-        height = fst $ size a
-        b = flatten $ M.findWithDefault (konst 0 (height, 1)) "" m
+        b = flatten $ M.findWithDefault (konst 0 (rows a, 1)) "" m
         getCoefficient (varName, s) = M.findWithDefault (konst 0 (s, s)) varName m
 
+-- The vector given to unpack might be longer than the total size of the
+-- variables. It might contain the dual variable values, for example.
 unpack :: S.Set (VarName, Int) -> Vector R -> M.Map VarName (Vector R)
 unpack vars result = M.fromList $ zip varNames coefficients
   where coefficients = map getCoefficient varList
@@ -124,6 +131,3 @@ unpack vars result = M.fromList $ zip varNames coefficients
         cumsum = scanl (+) 0 varSizes
         (varNames, varSizes) = unzip varList
         varList = S.toAscList vars
-
-someFunc :: IO ()
-someFunc = putStrLn "someFunc"
