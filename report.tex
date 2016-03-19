@@ -3,7 +3,7 @@
 \usepackage[T1]{fontenc}
 \usepackage{amsmath, amssymb, amsfonts, amsthm, minted}
 \usepackage[top=1in, bottom=1in, left=1in, right=1in]{geometry}
-\usepackage{graphicx}
+\usepackage{graphicx, caption, subcaption}
 \usepackage[numbers]{natbib}
 \usepackage{tikz}
 \usetikzlibrary{positioning,calc,shapes,arrows}
@@ -107,18 +107,41 @@ vectors and matrices.
 This is a purely functional interface to linear algebra and other numerical
 algorithms, internally implemented using LAPACK, BLAS, and GSL.
 
+The types provided (\verb|Matrix| and \verb|Vector|) are dense, immutable and
+strict in all elements (unboxed).
+We will only use the double precision real versions of these types, i.e.
+\verb|Matrix R| and \verb|Vector R| (\verb|R=Double|).
+The matrix product is \verb|(<>)|, the matrix-vector product is \verb|(#>)|, the
+dot product is \verb|(<.>)|, and the (conjugate) transpose is \verb|tr|.
+
 \section{Modeling}
 
-The key data structure is an \verb|Expr|, which contains variables and constants
-that are combined using linear mathematical functions (addition, scaling,
-matrix-vector multiplication, etc.).
+The key data type is a linear expression \verb|LinExpr|, which contains
+variables and constants that are combined using linear mathematical functions
+(addition, scaling, matrix-vector multiplication, etc.).
+A linear constraint (type \verb|LinContr|) can be form as
+\verb|LinExpr :==: LinExpr|.
+A quadratic expression \verb|QuadExpr| can be formed by taking square norm
+(\verb|SumSquares|) of linear expressions, or sum of many such square norms.
+
+The package provides a function \verb|minimize| to solve a least squares problem:
+\begin{minted}{haskell}
+minimize :: QuadExpr -> [LinContr] -> M.Map VarName (Vector R)
+\end{minted}
+The function takes a quadratic expression as objective, a list of linear
+constraints, and returns a map from variable names (type alias for
+\verb|String|) to variable values.
+
+For example, the classic problem of find the least norm solution to an
+under-determined system can be easily setup and solved with the following code:
+\inputminted{haskell}{app/example_least_norm.hs}
 
 \section{Implementation}
 
-Given a problem whose objective is an Expression and whose constraints are
-multiple other Expressions, the system will analyze the abstract syntax tree to
-transform it to the standard form above, and then solve it using linear algebra
-subroutines.
+Given a problem with a quadratic expression as objective and a list of linear
+constraints, the system will analyze the abstract syntax tree to transform it to
+the standard form in~\eqref{eq:std_form}, and then solve it using linear
+algebra subroutines.
 
 The three steps of solving a least squares problem is given in Figure~\ref{fig:steps}.
 \begin{figure}[!ht]
@@ -144,15 +167,70 @@ The three steps of solving a least squares problem is given in Figure~\ref{fig:s
       \tt{u = (0.59,\ldots}\\
       \tt{v = (1.9,\ldots}
       \end{array}$};
-  \path [line] (code) -- node {canonicalize} ++(4,0) -- (cone);
-  \path [line] (cone) -- node {solve} ++(0,-2.5) -- (sltn);
-  \path [line] (sltn) -- node {unpack} ++(-4,0) -- (unpack);
+  \path [line] (code) -- node {canonicalize} ++(4.5,0) -- (cone);
+  \path [line] (cone) -- node {solve} ++(0,-3.0) -- (sltn);
+  \path [line] (sltn) -- node {unpack} ++(-4.5,0) -- (unpack);
   \end{tikzpicture}
   \caption{Three steps of solving a least squares problem.}
   \label{fig:steps}
 \end{figure}
 
-\section{Examples}
+In the canonicalization step, we stack all the variables in the problem as one
+big variable, and then stack the linear constraints.
+For example, given constraints $Cu + Dv = w$ and $Eu = z$, we produce the equivalent
+constraint
+\begin{equation*}
+  \begin{bmatrix} C & D \\ E & 0 \end{bmatrix} \begin{bmatrix} u \\
+    v \end{bmatrix} = \begin{bmatrix} w \\ z \end{bmatrix}.
+\end{equation*}
+Since the objective is a sum of square norms, we convert this sum to a single
+equivalent square norm.
+For example, if the objective is $\norm{Au - b}^2 + 2\norm{v}^2$, the equivalent
+square norm is
+\begin{equation*}
+  \norm{\begin{bmatrix} A & 0 \\ 0 & \sqrt{2}I \end{bmatrix} \begin{bmatrix} u
+      \\ v \end{bmatrix} - \begin{bmatrix} b \\ 0 \end{bmatrix} }^2,
+\end{equation*}
+where $I$ is the identity matrix.
+We then form a new variable $x = \begin{bmatrix} u \\ v \end{bmatrix}$ and thus
+both the objective and the constraints are transformed to standard form.
+
+In the solve step, we simply call the least squares solver provided by
+\verb|hmatrix|. The unpacking step takes the resulting vector and assign the
+values to the original variables.
+
+\section{Example}
+
+We consider an example of least squares modeling in image de-blurring. Suppose
+that $x$ is an image, $A$ is a blurring operator, and $y = Ax + v$ is a blurred,
+noisy image that we are given. We choose $x$ to minimize
+\begin{equation*}
+ \|Ax -  y\|^2 + \lambda (\|D_\mathrm v x\|^2 + \|D_\mathrm h x\|^2),
+\end{equation*}
+where $D_\mathrm v$, $D_\mathrm h$ are vertical and horizontal differencing
+operations and the scalar parameter $\lambda$ controls smoothing of de-blurred
+image. The problem can be expressed in this natural form:
+\begin{minted}{haskell}
+minimize (SumSquares (a*x-b) + lambda * (SumSquares (dv*x) + SumSquares (dh*x))) []
+\end{minted}
+
+We show the burred, noisy image and the recovered image with $\lambda = 0.007$
+in Figure~\ref{fig:images}.
+\begin{figure}[!ht]
+  \centering
+  \begin{subfigure}{0.49\textwidth}
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/boat_blurred}
+    \caption{Blurred, noisy image}
+  \end{subfigure}
+  \begin{subfigure}{0.49\textwidth}
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/boat_deblurred}
+    \caption{Recovered image}
+  \end{subfigure}
+  \caption{Blurred, noisy image and regularized inversion with $\lambda = 0.007$.}
+  \label{fig:images}
+\end{figure}
 
 \section{Conclusion}
 
