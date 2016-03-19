@@ -4,12 +4,15 @@
 \usepackage{amsmath, amssymb, amsfonts, amsthm, minted}
 \usepackage[top=1in, bottom=1in, left=1in, right=1in]{geometry}
 \usepackage{graphicx}
+\usepackage[numbers]{natbib}
 \usepackage{tikz}
 \usetikzlibrary{positioning,calc,shapes,arrows}
 % Define block styles XXX
 \tikzstyle{block} = [rectangle, draw,
     text width=8em, text centered, minimum height=5em]
 \tikzstyle{line} = [draw, -latex',line width=1mm]
+
+\bibliographystyle{plainnat}
 
 \providecommand{\abs}[1]{\left\lvert#1\right\rvert}
 \providecommand{\norm}[1]{\left\lVert#1\right\rVert}
@@ -61,6 +64,8 @@ constrained by the standard form.
 
 \section{Background}
 
+\subsection{Solution to the least squares problem}
+
 The (unconstrained) \emph{least squares problem} has the standard form
 \begin{equation*}
   \begin{array}{ll}
@@ -94,6 +99,13 @@ where $z$ is the dual variable to the equality constraint.
 We assume that the matrix above is invertible.
 This occurs when the matrix $C$ has independent rows, and the matrix
 $\begin{bmatrix} A \\ C \end{bmatrix}$ has independent columns.
+
+\subsection{Numerical linear algebra in Haskell}
+
+We use the package \verb|hmatrix|~\cite{ruiz2015hmatrix-0.17.0.1} to handle
+vectors and matrices.
+This is a purely functional interface to linear algebra and other numerical
+algorithms, internally implemented using LAPACK, BLAS, and GSL.
 
 \section{Modeling}
 
@@ -162,8 +174,10 @@ estimation, machine learning, and engineering design.
 
 We thank Professor Stephen Boyd for introducing us to many examples of least
 squares modeling in control, statistical estimation, and engineering design.
-We also thank David Zeng whose Julia package \verb|LinearLeastSquares| inspired
-this project.
+We also thank David Zeng whose Julia package \verb|LinearLeastSquares|
+\cite{zeng2014linearleastsquares} inspired this project.
+
+\bibliography{report}
 
 \end{document}
 %%% Local Variables:
